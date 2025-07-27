@@ -22,8 +22,7 @@ module.exports = {
                 { name: '🗓️ Days', value: `${days}d`, inline: true },
                 { name: '⏰ Hours', value: `${hours}h`, inline: true },
                 { name: '🕑 Minutes', value: `${minutes}m`, inline: true },
-                { name: '⏱️ Seconds', value: `${seconds}s`, inline: true },
-                { name: '📊 ISO Format', value: botUptimeISO, inline: false }
+                { name: '⏱️ Seconds', value: `${seconds}s`, inline: true }
             )
             .setTimestamp()
             .setFooter({

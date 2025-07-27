@@ -18,11 +18,12 @@ module.exports = {
         const message = interaction.options.getString('message');
 
         try {
+            await interaction.deferReply({ flags: 64 });
             await target.send(message);
-                return interaction.reply({ content: `Message : **${message}** sent to **${target.tag}!**`, ephemeral: true });
+                return interaction.editReply({ content: `Message : **${message}** sent to **${target.tag}!**`, ephemeral: true });
         } catch (error) {
             console.error(error);
-            await interaction.reply({ content: 'There was an error trying to dm this user!', ephemeral: true });
+            await interaction.editReply({ content: 'There was an error trying to dm this user!', ephemeral: true });
         }
     },
 

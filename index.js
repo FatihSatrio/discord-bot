@@ -2,6 +2,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { REST, Routes } = require('discord.js');
+const { logCommandUsage } = require('./utils/commandLog');
 
 const deployCommands = async () => {
     try {
@@ -130,6 +131,8 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     try {
+        await logCommandUsage(interaction);
+
         await command.execute(interaction);
     } catch (error) {
         console.error(error);

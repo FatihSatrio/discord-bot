@@ -118,6 +118,10 @@ client.once(Events.ClientReady, async () => {
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
+    if (!interaction.inGuild()) {
+        return interaction.reply({ content: '# This command is only can execute in discord server.', ephemeral: true });
+    }
+
     const command = client.commands.get(interaction.commandName);
 
     if (!command) {

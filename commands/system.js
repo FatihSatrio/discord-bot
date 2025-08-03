@@ -11,10 +11,7 @@ module.exports = {
 
     async execute(interaction) {
         if (interaction.user.id !== process.env.BOT_OWNER_ID) {
-            return interaction.reply({
-                content: '🚫 Only the bot owner can use this command.',
-                ephemeral: true
-            });
+            return interaction.reply({ content: '🚫 Only the bot owner can use this command.', ephemeral: true });
         }
 
         await interaction.deferReply({ ephemeral: true });

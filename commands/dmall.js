@@ -34,7 +34,7 @@ module.exports = {
         failed++;
       }
 
-      await sleep(1000);
+      await sleep(100);
     }
 
     await interaction.editReply({

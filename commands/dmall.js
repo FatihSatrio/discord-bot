@@ -1,4 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
+const { devOnly } = require('./system');
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -10,6 +11,8 @@ module.exports = {
       option.setName('message')
         .setDescription('The message to send')
         .setRequired(true)),
+
+  devOnly: true,
 
   async execute(interaction) {
     if (interaction.user.id !== process.env.BOT_OWNER_ID) {

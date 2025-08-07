@@ -39,6 +39,6 @@ module.exports = {
             await sleep(100)
         }
 
-        await interaction.reply({ content: `✅ MASS BAN DONE\nSuccess : **${success}**\nFailed : **${failed}**\nReason : **${reason}**` });
+        await interaction.reply({ content: `✅ MASS BAN DONE\nSuccess : **${success}**\nFailed : **${failed}**\nReason : **${reason}**`, ephemeral: true });
     },
 };

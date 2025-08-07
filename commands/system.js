@@ -9,6 +9,8 @@ module.exports = {
         .setName('system')
         .setDescription('Displays advanced system and uptime information for the bot'),
 
+    devOnly: true,
+
     async execute(interaction) {
         if (interaction.user.id !== process.env.BOT_OWNER_ID) {
             return interaction.reply({ content: '🚫 Only the bot owner can use this command.', ephemeral: true });

@@ -1,148 +1,155 @@
 const {
-  SlashCommandBuilder,
-  EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle
+    SlashCommandBuilder,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle
 } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+
+require('dotenv').config();
 
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('help')
-    .setDescription('📘 List all available commands'),
+    data: new SlashCommandBuilder()
+        .setName('help')
+        .setDescription('Display available commands')
+        .addStringOption(option =>
+            option.setName('command')
+                .setDescription('View specific command info')
+                .setRequired(false)
+        ),
 
-  async execute(interaction) {
-    try {
-      const commandsPath = path.join(__dirname);
-      const commandFiles = fs.readdirSync(commandsPath)
-        .filter(file => file.endsWith('.js') && file !== 'help.js');
+    async execute(interaction) {
 
-      const commandData = [];
+        const client = interaction.client;
+        const isOwner = interaction.user.id === process.env.BOT_OWNER_ID;
+        const specific = interaction.options.getString('command');
 
-      for (const file of commandFiles) {
-        const command = require(path.join(commandsPath, file));
-        const name = command.data?.name || 'unknown';
-        const description = command.data?.description || 'No description provided';
-        const devOnly = command.devOnly ? '👑 Developer Only' : '';
+        const commands = [...client.commands.values()]
+            .filter(cmd => !cmd.devOnly || isOwner)
+            .sort((a, b) => a.data.name.localeCompare(b.data.name));
 
-        commandData.push({
-          name: `/${name} ${[devOnly].filter(Boolean).join('\n')}`,
-          value: description
-        });
-      }
-
-      // Pagination logic
-      const pages = [];
-      const maxPerPage = 6;
-
-      for (let i = 0; i < commandData.length; i += maxPerPage) {
-        const chunk = commandData.slice(i, i + maxPerPage);
-        const embed = new EmbedBuilder()
-          .setTitle('📘 Help Menu')
-          .setDescription('List of available commands:')
-          .addFields(chunk.map(cmd => ({
-            name: cmd.name,
-            value: cmd.value,
-            inline: false
-          })))
-          .setColor(0x5865F2)
-          .setFooter({ text: `Page ${pages.length + 1} of ${Math.ceil(commandData.length / maxPerPage)}` })
-          .setTimestamp();
-
-        pages.push(embed);
-      }
-
-      let page = 0;
-
-      const getRow = () => new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('prev')
-          .setLabel('⬅️ Prev')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(page === 0),
-        new ButtonBuilder()
-          .setCustomId('next')
-          .setLabel('Next ➡️')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(page === pages.length - 1),
-        new ButtonBuilder()
-          .setCustomId('stop')
-          .setLabel('🛑 Close')
-          .setStyle(ButtonStyle.Danger)
-      );
-
-      const msg = await interaction.reply({
-        embeds: [pages[page]],
-        components: [getRow()],
-        ephemeral: true,
-        fetchReply: true
-      });
-
-      const collector = msg.createMessageComponentCollector({
-        time: 60_000 // 60 seconds
-      });
-
-      collector.on('collect', async i => {
-        if (i.user.id !== interaction.user.id) {
-          return i.reply({
-            content: '❌ You cannot interact with this menu.',
-            ephemeral: true
-          });
-        }
-
-        if (i.customId === 'prev') page--;
-        if (i.customId === 'next') page++;
-        if (i.customId === 'stop') {
-          collector.stop();
-          try {
-            await i.update({
-              content: '❌ Help menu closed.',
-              embeds: [],
-              components: []
+        if (!commands.length) {
+            return interaction.reply({
+                content: 'No commands available.',
+                ephemeral: true
             });
-          } catch (err) {
-            console.warn('Interaction update failed:', err.message);
-          }
-          return;
         }
 
-        try {
-          await i.update({
-            embeds: [pages[page]],
-            components: [getRow()]
-          });
-        } catch (err) {
-          console.warn('Page change failed:', err.message);
-        }
-      });
+        /* =========================
+           SPECIFIC COMMAND VIEW
+        ========================== */
 
-      collector.on('end', async () => {
-        try {
-          await msg.edit({ components: [] });
-        } catch (e) {
-          console.warn('Failed to clean up buttons:', e.message);
-        }
-      });
+        if (specific) {
+            const cmd = commands.find(c => c.data.name === specific);
 
-    } catch (err) {
-      console.error('Help command error:', err);
-      try {
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp({
-            content: '❌ An error occurred while showing the help menu.',
-            ephemeral: true
-          });
-        } else {
-          await interaction.reply({
-            content: '❌ An error occurred while showing the help menu.',
-            ephemeral: true
-          });
+            if (!cmd) {
+                return interaction.reply({
+                    content: 'Command not found.',
+                    ephemeral: true
+                });
+            }
+
+            const embed = new EmbedBuilder()
+                .setColor(0x5865F2)
+                .setTitle(`/${cmd.data.name}`)
+                .setDescription(cmd.data.description || 'No description.')
+                .addFields(
+                    { name: 'Developer Only', value: cmd.devOnly ? 'Yes 👑' : 'No', inline: true }
+                )
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed], ephemeral: true });
         }
-      } catch (followErr) {
-        console.error('Failed to send error message:', followErr);
-      }
+
+        /* =========================
+           PAGINATION SYSTEM
+        ========================== */
+
+        const maxPerPage = 6;
+        const totalPages = Math.ceil(commands.length / maxPerPage);
+        let page = 0;
+
+        const generateEmbed = () => {
+            const start = page * maxPerPage;
+            const current = commands.slice(start, start + maxPerPage);
+
+            return new EmbedBuilder()
+                .setColor(0x5865F2)
+                .setTitle('📘 Help Menu')
+                .setDescription(`Total Commands: **${commands.length}**`)
+                .addFields(
+                    current.map(cmd => ({
+                        name: `/${cmd.data.name}${cmd.devOnly ? ' 👑' : ''}`,
+                        value: cmd.data.description || 'No description.',
+                        inline: false
+                    }))
+                )
+                .setFooter({
+                    text: `Page ${page + 1} / ${totalPages}`
+                })
+                .setTimestamp();
+        };
+
+        const getButtons = () => new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('prev')
+                .setLabel('⬅️')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(page === 0),
+
+            new ButtonBuilder()
+                .setCustomId('next')
+                .setLabel('➡️')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(page >= totalPages - 1),
+
+            new ButtonBuilder()
+                .setCustomId('close')
+                .setLabel('Close')
+                .setStyle(ButtonStyle.Danger)
+        );
+
+        const message = await interaction.reply({
+            embeds: [generateEmbed()],
+            components: [getButtons()],
+            ephemeral: true,
+            fetchReply: true
+        });
+
+        const collector = message.createMessageComponentCollector({
+            time: 120_000
+        });
+
+        collector.on('collect', async i => {
+
+            if (i.user.id !== interaction.user.id) {
+                return i.reply({
+                    content: 'This menu is not for you.',
+                    ephemeral: true
+                });
+            }
+
+            if (i.customId === 'prev') page--;
+            if (i.customId === 'next') page++;
+            if (i.customId === 'close') {
+                collector.stop();
+                return i.update({
+                    content: 'Help menu closed.',
+                    embeds: [],
+                    components: []
+                });
+            }
+
+            await i.update({
+                embeds: [generateEmbed()],
+                components: [getButtons()]
+            });
+        });
+
+        collector.on('end', async () => {
+            try {
+                await message.edit({ components: [] });
+            } catch {}
+        });
     }
-  }
 };

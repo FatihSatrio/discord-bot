@@ -1,35 +1,50 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
+function formatDuration(seconds) {
+    seconds = Math.floor(seconds);
+
+    const d = Math.floor(seconds / 86400);
+    const h = Math.floor(seconds % 86400 / 3600);
+    const m = Math.floor(seconds % 3600 / 60);
+    const s = Math.floor(seconds % 60);
+
+    const parts = [];
+    if (d) parts.push(`${d}d`);
+    if (h) parts.push(`${h}h`);
+    if (m) parts.push(`${m}m`);
+    if (s || parts.length === 0) parts.push(`${s}s`);
+
+    return parts.join(' ');
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('uptime')
-        .setDescription('Show uptime of the bot!'),
+        .setDescription('Displays bot uptime information'),
 
     async execute(interaction) {
-        const processUptime = process.uptime(); // in seconds
-        const botUptimeISO = new Date(processUptime * 1000).toISOString().substr(11, 8); // HH:MM:SS
 
-        const totalSeconds = Math.floor(processUptime);
-        const days = Math.floor(totalSeconds / (60 * 60 * 24));
-        const hours = Math.floor((totalSeconds / (60 * 60)) % 24);
-        const minutes = Math.floor((totalSeconds / 60) % 60);
-        const seconds = totalSeconds % 60;
+        const uptimeSeconds = process.uptime();
+        const formatted = formatDuration(uptimeSeconds);
+
+        const startedAtUnix = Math.floor(Date.now() / 1000 - uptimeSeconds);
 
         const embed = new EmbedBuilder()
-            .setTitle('🕒 Bot Uptime')
-            .setColor('Green')
-            .addFields(
-                { name: '🗓️ Days', value: `${days}d`, inline: true },
-                { name: '⏰ Hours', value: `${hours}h`, inline: true },
-                { name: '🕑 Minutes', value: `${minutes}m`, inline: true },
-                { name: '⏱️ Seconds', value: `${seconds}s`, inline: true }
+            .setColor(0x2ecc71)
+            .setTitle('⏱️ Bot Uptime')
+            .setDescription(
+                `**Running for:**\n` +
+                `\`${formatted}\`\n\n` +
+                `**Started:**\n` +
+                `<t:${startedAtUnix}:F>\n` +
+                `<t:${startedAtUnix}:R>`
             )
-            .setTimestamp()
             .setFooter({
-                text: 'Uptime',
-                iconURL: 'https://cdn.glitch.global/f17846b6-dd81-4025-aa4d-414956f8c9d1/emoji3.png?v=1742049392731'
-            });
+                text: `Process ID: ${process.pid}`
+            })
+            .setTimestamp()
+            .setFooter({ text: 'Uptime', iconURL: 'https://cdn.glitch.global/f17846b6-dd81-4025-aa4d-414956f8c9d1/emoji3.png?v=1742049392731' });
 
         await interaction.reply({ embeds: [embed] });
-    },
+    }
 };

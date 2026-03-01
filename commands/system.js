@@ -2,115 +2,135 @@ const { SlashCommandBuilder, EmbedBuilder, version: djsVersion } = require('disc
 const os = require('os');
 const process = require('process');
 const { getDiskInfoSync } = require('node-disk-info');
+const { monitorEventLoopDelay } = require('perf_hooks');
 require('dotenv').config();
+
+function formatDuration(seconds) {
+    seconds = Math.floor(seconds);
+    const d = Math.floor(seconds / 86400);
+    const h = Math.floor(seconds % 86400 / 3600);
+    const m = Math.floor(seconds % 3600 / 60);
+    const s = Math.floor(seconds % 60);
+    return `${d}d ${h}h ${m}m ${s}s`;
+}
+
+function gb(bytes) {
+    return (bytes / 1024 / 1024 / 1024).toFixed(2);
+}
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('system')
-        .setDescription('Displays advanced system and uptime information for the bot'),
+        .setDescription('Ultra enterprise diagnostics'),
 
     devOnly: true,
 
     async execute(interaction) {
+
         if (interaction.user.id !== process.env.BOT_OWNER_ID) {
-            return interaction.reply({ content: '🚫 Only the bot owner can use this command.', ephemeral: true });
+            return interaction.reply({
+                content: '🚫 Only bot owner allowed.',
+                ephemeral: true
+            });
         }
 
         await interaction.deferReply({ ephemeral: true });
 
-        const processUptime = process.uptime();
-        const botUptime = new Date(processUptime * 1000).toISOString().substr(11, 8);
-        const osUptime = `${Math.floor(os.uptime() / 3600)}h ${Math.floor((os.uptime() % 3600) / 60)}m`;
+        const client = interaction.client;
 
-        const memoryUsageMB = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2);
-        const totalMemGB = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
-        const freeMemGB = (os.freemem() / 1024 / 1024 / 1024).toFixed(2);
+        /* ================= CPU SAMPLE ================= */
 
-        const cpuModel = os.cpus()[0].model;
-        const cpuCount = os.cpus().length;
-        const loadAvg = os.loadavg().map(n => n.toFixed(2)).join(' / ');
+        const startUsage = process.cpuUsage();
+        const startTime = process.hrtime();
+        await new Promise(res => setTimeout(res, 200));
+        const diffUsage = process.cpuUsage(startUsage);
+        const diffTime = process.hrtime(startTime);
 
-        const nodeVersion = process.version;
-        const platform = os.platform();
-        const arch = os.arch();
+        const cpuPercent = (
+            (diffUsage.user + diffUsage.system) /
+            (diffTime[0] * 1e6 + diffTime[1] / 1e3)
+        * 100).toFixed(2);
 
-        const hostname = os.hostname();
-        const ipList = Object.values(os.networkInterfaces())
-            .flat()
-            .filter(i => i.family === 'IPv4' && !i.internal)
-            .map(i => i.address)
-            .join(', ') || 'Unknown';
+        /* ================= MEMORY ================= */
 
-        const guildCount = interaction.client.guilds.cache.size;
-        const wsPing = interaction.client.ws.ping;
+        const totalMem = os.totalmem();
+        const freeMem = os.freemem();
+        const usedMem = totalMem - freeMem;
+        const memPercent = ((usedMem / totalMem) * 100).toFixed(1);
 
-        const cpuUsageRaw = process.cpuUsage();
-        const cpuUser = (cpuUsageRaw.user / 1000).toFixed(2);
-        const cpuSys = (cpuUsageRaw.system / 1000).toFixed(2);
-        const cpuTotal = (+cpuUser + +cpuSys).toFixed(2);
+        /* ================= EVENT LOOP ================= */
 
-        const pid = process.pid;
-        const cwd = process.cwd();
-        const execPath = process.execPath;
-        const startTime = new Date(Date.now() - process.uptime() * 1000).toLocaleString('en-US', {
-            timeZone: 'Asia/Jakarta',
-            hour12: false,
-        });
+        const h = monitorEventLoopDelay();
+        h.enable();
+        await new Promise(r => setTimeout(r, 200));
+        h.disable();
+        const eventLoop = (h.mean / 1e6).toFixed(2);
 
-        // Disk usage with node-disk-info
-        let diskUsageField = { name: '💽 Disk Usage', value: 'Unavailable', inline: false };
+        /* ================= DISK ================= */
+
+        let diskText = 'Unavailable';
         try {
             const disks = getDiskInfoSync();
-            const disk = disks.find(d => d.mounted === '/' || d.mounted === 'C:\\' || d.mounted === 'C:');
-            if (disk) {
-                const total = (disk.blocks / 1024 / 1024).toFixed(2);
-                const used = (disk.used / 1024 / 1024).toFixed(2);
-                const available = (disk.available / 1024 / 1024).toFixed(2);
-                const percent = disk.capacity;
+            const disk = disks[0];
+            const total = (disk.blocks / 1024 / 1024).toFixed(2);
+            const used = (disk.used / 1024 / 1024).toFixed(2);
+            diskText = `${used}GB / ${total}GB (${disk.capacity})`;
+        } catch {}
 
-                diskUsageField = {
-                    name: '💽 Disk Usage',
-                    value: `${used} GB / ${total} GB (${percent} used)`,
-                    inline: false
-                };
-            }
-        } catch (error) {
-            console.error('Disk Info Error:', error.message);
+        /* ================= HEALTH STATUS ================= */
+
+        let health = '🟢 Healthy';
+        if (memPercent > 80 || cpuPercent > 75) health = '🟡 Warning';
+        if (memPercent > 90 || cpuPercent > 90) health = '🔴 Critical';
+
+        /* ================= SHARD / CLUSTER ================= */
+
+        const shardId = interaction.guild?.shardId ?? 0;
+        const shardCount = client.shard?.count ?? 1;
+        const clusterId = process.env.CLUSTER_ID ?? 'Single';
+
+        /* ================= OPTIONAL DB PING ================= */
+
+        let dbPing = 'Not configured';
+        if (client.db?.ping) {
+            const start = Date.now();
+            await client.db.ping();
+            dbPing = `${Date.now() - start} ms`;
         }
 
+        /* ================= EMBED ================= */
+
         const embed = new EmbedBuilder()
-            .setTitle('🖥️ System Overview')
-            .setColor(0x00bfff)
+            .setColor(health.includes('Critical') ? 0xff0000 :
+                     health.includes('Warning') ? 0xffcc00 : 0x00ff99)
+            .setTitle('🖥️ Ultra Enterprise Monitoring')
+            .setDescription(`Status: **${health}**`)
             .addFields(
-                { name: '🤖 Bot Uptime', value: botUptime, inline: true },
+
+                { name: '⏱ Bot Uptime', value: formatDuration(process.uptime()), inline: true },
+                { name: '🕰 OS Uptime', value: formatDuration(os.uptime()), inline: true },
+                { name: '🏠 Guilds', value: `${client.guilds.cache.size}`, inline: true },
+
+                { name: '📦 Node', value: process.version, inline: true },
                 { name: '📚 Discord.js', value: `v${djsVersion}`, inline: true },
-                { name: '📦 Node.js', value: nodeVersion, inline: true },
+                { name: '🧱 Platform', value: `${os.platform()} (${os.arch()})`, inline: true },
 
-                { name: '💾 RAM Usage', value: `${memoryUsageMB} MB`, inline: true },
-                { name: '📈 Total RAM', value: `${totalMemGB} GB`, inline: true },
-                { name: '📉 Free RAM', value: `${freeMemGB} GB`, inline: true },
+                { name: '💾 RAM', value: `${gb(usedMem)}GB / ${gb(totalMem)}GB (${memPercent}%)`, inline: false },
+                { name: '⚙️ CPU Usage', value: `${cpuPercent}%`, inline: true },
+                { name: '🔁 Event Loop Delay', value: `${eventLoop} ms`, inline: true },
 
-                { name: '🧠 CPU Model', value: cpuModel, inline: false },
-                { name: '🧮 CPU Cores', value: `${cpuCount}`, inline: true },
-                { name: '⚙️ CPU Usage', value: `${cpuTotal} ms (User: ${cpuUser} / System: ${cpuSys})`, inline: true },
+                { name: '💽 Disk', value: diskText, inline: false },
 
-                { name: '📊 Load Avg (1/5/15m)', value: loadAvg, inline: true },
-                { name: '🌐 Hostname', value: hostname, inline: true },
-                { name: '📡 IP Address', value: ipList, inline: true },
+                { name: '🏓 API Latency', value: `${Math.round(client.ws.ping)} ms`, inline: true },
+                { name: '🧩 Shard', value: `${shardId}/${shardCount}`, inline: true },
+                { name: '🗂 Cluster', value: `${clusterId}`, inline: true },
 
-                { name: '🧱 Platform', value: `${platform} (${arch})`, inline: true },
-                { name: '🕰️ OS Uptime', value: osUptime, inline: true },
-                { name: '🏓 WS Ping', value: `${wsPing} ms`, inline: true },
-
-                { name: '📍 PID', value: `${pid}`, inline: true },
-                { name: '📂 Working Dir', value: cwd, inline: false },
-                { name: '🔐 Executable', value: execPath, inline: false },
-
-                { name: '🗓️ Start Time', value: startTime, inline: true },
-                { name: '🏠 Guilds Joined', value: `${guildCount}`, inline: true },
-                { name: '👤 Requested By', value: `${interaction.user.tag}`, inline: true },
-                diskUsageField
+                { name: '🗄 Database Ping', value: dbPing, inline: true },
+                { name: '🆔 PID', value: `${process.pid}`, inline: true }
             )
+            .setFooter({
+                text: `Requested by ${interaction.user.tag}`
+            })
             .setTimestamp();
 
         await interaction.editReply({ embeds: [embed] });
